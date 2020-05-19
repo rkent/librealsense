@@ -6,7 +6,25 @@
 
 -----------------
 
+## Description of this fork
+The intent of this fork is to fix the SR305 camera on a Jetson nano. Turns out the SR305 depth image does not work, but the fix is easy.
+I just disabled the use of cuda in one file, and that seems to do the trick. Not claiming this is the right fix, but it works for me.
+
+My build instruction (on a Jetson Nano with all dependencies installed):
+1)  clone https://github.com/IntelRealSense/librealsense.git
+2)  cd librealsense
+3)  mkdir build
+4)  cd build
+5)  cmake .. -DBUILD_EXAMPLES=true -DFORCE_LIBUVC=true -DBUILD_WITH_CUDA=true -DCMAKE_BUILD_TYPE=release -DBUILD_PYTHON_BINDINGS=bool:true
+6)  make -j4
+7)  sudo make install
+
+In my case, the camera is being run from realsense-ros. So I rebuild that using the libraries installed above.
+
+R. Kent James <kent@caspia.com> May 18, 2020
+
 ## Overview
+
 **Intel® RealSense™ SDK 2.0** is a cross-platform library for Intel® RealSense™ depth cameras (D400 series and the SR300) and the [T265 tracking camera](./doc/t265.md).
 
 > :pushpin: For other Intel® RealSense™ devices (F200, R200, LR200 and ZR300), please refer to the [latest legacy release](https://github.com/IntelRealSense/librealsense/tree/v1.12.1).

@@ -5,18 +5,18 @@
 
 #include "stream.h"
 
-#ifdef RS2_USE_CUDA
+#ifdef RS2_USE_CUDA_NOT
 #include "cuda/cuda-conversion.cuh"
 #endif
 
 namespace librealsense
-{
+{sudo make install
     void unpack_z16_y8_from_sr300_inzi(byte * const dest[], const byte * source, int width, int height, int actual_size)
     {
         auto count = width * height;
         auto in = reinterpret_cast<const uint16_t*>(source);
         auto out_ir = reinterpret_cast<uint8_t *>(dest[1]);
-#ifdef RS2_USE_CUDA
+#ifdef RS2_USE_CUDA_NOT
         rscuda::unpack_z16_y8_from_sr300_inzi_cuda(out_ir, in, count);
 #else
         for (int i = 0; i < count; ++i) *out_ir++ = *in++ >> 2;
@@ -29,7 +29,7 @@ namespace librealsense
         auto count = width * height;
         auto in = reinterpret_cast<const uint16_t*>(source);
         auto out_ir = reinterpret_cast<uint16_t*>(dest[1]);
-#ifdef RS2_USE_CUDA
+#ifdef RS2_USE_CUDA_NOT
         rscuda::unpack_z16_y16_from_sr300_inzi_cuda(out_ir, in, count);
 #else
         for (int i = 0; i < count; ++i) *out_ir++ = *in++ << 6;
