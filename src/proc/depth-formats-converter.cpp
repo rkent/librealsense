@@ -10,7 +10,7 @@
 #endif
 
 namespace librealsense
-{sudo make install
+{
     void unpack_z16_y8_from_sr300_inzi(byte * const dest[], const byte * source, int width, int height, int actual_size)
     {
         auto count = width * height;
