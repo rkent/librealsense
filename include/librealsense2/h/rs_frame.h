@@ -61,6 +61,10 @@ typedef enum rs2_frame_metadata_value
     RS2_FRAME_METADATA_FRAME_EMITTER_MODE                   , /**< Emitter mode: 0 - all emitters disabled. 1 - laser enabled. 2 - auto laser enabled (opt). 3 - LED enabled (opt).*/
     RS2_FRAME_METADATA_FRAME_LED_POWER                      , /**< Led power value 0-360. */
     RS2_FRAME_METADATA_RAW_FRAME_SIZE                       , /**< The number of transmitted payload bytes, not including metadata */
+    RS2_FRAME_METADATA_GPIO_INPUT_DATA                      , /**< GPIO input data */
+    RS2_FRAME_METADATA_SEQUENCE_NAME                         , /**< sub-preset id */
+    RS2_FRAME_METADATA_SEQUENCE_ID                , /**< sub-preset sequence id */
+    RS2_FRAME_METADATA_SEQUENCE_SIZE              , /**< sub-preset sequence size */
     RS2_FRAME_METADATA_COUNT
 } rs2_frame_metadata_value;
 const char* rs2_frame_metadata_to_string(rs2_frame_metadata_value metadata);

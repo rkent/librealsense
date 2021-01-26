@@ -52,6 +52,7 @@ namespace librealsense
         const uint8_t DS5_ENABLE_AUTO_WHITE_BALANCE       = 0xA;
         const uint8_t DS5_ENABLE_AUTO_EXPOSURE            = 0xB;
         const uint8_t DS5_LED_PWR                         = 0xE;
+        const uint8_t DS5_THERMAL_COMPENSATION            = 0xF;
 
         // Devices supported by the current version
         static const std::set<std::uint16_t> rs400_sku_pid = {
@@ -204,7 +205,7 @@ namespace librealsense
             GET_PWM_ON_OFF  = 0x78,     // get emitter on and off mode
             SETSUBPRESET    = 0x7B,     // Download sub-preset
             GETSUBPRESET    = 0x7C,     // Upload the current sub-preset
-            GETSUBPRESETNAME= 0x7D,     // Retrieve sub-preset's name
+            GETSUBPRESETID  = 0x7D,     // Retrieve sub-preset's name
             RECPARAMSGET    = 0x7E,     // Retrieve depth calibration table in new format (fw >= 5.11.12.100)
             LASERONCONST    = 0x7F,     // Enable Laser On constantly (GS SKU Only)
             AUTO_CALIB      = 0x80      // auto calibration commands
@@ -238,7 +239,7 @@ namespace librealsense
             ENUM2STR(GET_PWM_ON_OFF);
             ENUM2STR(SETSUBPRESET);
             ENUM2STR(GETSUBPRESET);
-            ENUM2STR(GETSUBPRESETNAME);
+            ENUM2STR(GETSUBPRESETID);
             default:
               return (to_string() << "Unrecognized FW command " << state);
           }
@@ -255,10 +256,11 @@ namespace librealsense
 
         enum inter_cam_sync_mode
         {
-            INTERCAM_SYNC_DEFAULT,
-            INTERCAM_SYNC_MASTER,
-            INTERCAM_SYNC_SLAVE,
-            INTERCAM_SYNC_MAX
+            INTERCAM_SYNC_DEFAULT    = 0,
+            INTERCAM_SYNC_MASTER     = 1,
+            INTERCAM_SYNC_SLAVE      = 2,
+            INTERCAM_SYNC_FULL_SLAVE = 3,
+            INTERCAM_SYNC_MAX        = 258 // 4-258 are for Genlock with burst count of 1-255 frames for each trigger
         };
 
         enum class d400_caps : uint16_t
@@ -315,7 +317,7 @@ namespace librealsense
                             d400_caps::CAP_BMI_055,         d400_caps::CAP_BMI_085 })
             {
                 if (i==(i&cap))
-                    stream << d400_capabilities_names.at(i) << " ";
+                    stream << d400_capabilities_names.at(i) << "/";
             }
             return stream;
         }
@@ -331,7 +333,6 @@ namespace librealsense
             uint32_t                param;          // This field content is defined ny table type
             uint32_t                crc32;          // crc of all the actual table data excluding header/CRC
         };
-#pragma pack(pop)
 
         enum ds5_rect_resolutions : unsigned short
         {
@@ -378,6 +379,7 @@ namespace librealsense
             float  ppx;
             float  ppy;
         };
+#pragma pack(pop)
 
         template<class T>
         const T* check_calib(const std::vector<uint8_t>& raw_data)
@@ -559,7 +561,8 @@ namespace librealsense
         enum imu_eeprom_id : uint16_t
         {
             dm_v2_eeprom_id     = 0x0101,   // The pack alignment is Big-endian
-            tm1_eeprom_id       = 0x0002
+            tm1_eeprom_id       = 0x0002,
+            l500_eeprom_id      = 0x0105
         };
 
         struct depth_table_control
@@ -667,7 +670,7 @@ namespace librealsense
                 data_present.emplace(imu_calibration_id, false);
                 data_present.emplace(lens_shading_id, false);
                 data_present.emplace(projector_id, false);
-            };
+            }
         };
 
         static std::map< ds5_rect_resolutions, int2> resolutions_list = {
@@ -766,9 +769,19 @@ namespace librealsense
 
         std::vector<platform::uvc_device_info> filter_device_by_capability(const std::vector<platform::uvc_device_info>& devices, d400_caps caps);
 
-        const std::vector<uint8_t> alternating_emitter_pattern { 0x19, 0,
+        // subpreset pattern used in firmware versions that do not support subpreset ID
+        const std::vector<uint8_t> alternating_emitter_pattern_with_name{ 0x19, 0,
             0x41, 0x6c, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x74, 0x69, 0x6e, 0x67, 0x5f, 0x45, 0x6d, 0x69, 0x74, 0x74, 0x65, 0x72, 0,
             0, 0x2, 0, 0x5, 0, 0x1, 0x1, 0, 0, 0, 0, 0, 0, 0, 0x5, 0, 0x1, 0x1, 0, 0, 0, 0x1, 0, 0, 0 };
+
+        // subpreset ID for the alternating emitter subpreset as const
+        // in order to permit the query of this option to check if the current subpreset ID
+        // is the alternating emitter ID
+        const uint8_t ALTERNATING_EMITTER_SUBPRESET_ID = 0x0f;
+
+        const std::vector<uint8_t> alternating_emitter_pattern { 0x5, ALTERNATING_EMITTER_SUBPRESET_ID, 0, 0, 0x2,
+            0x4, 0x1, 0, 0x1, 0, 0, 0, 0, 0,
+            0x4, 0x1, 0, 0x1, 0, 0x1, 0, 0, 0 };
 
     } // librealsense::ds
 } // namespace librealsense

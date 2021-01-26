@@ -45,6 +45,10 @@ macro(global_set_flags)
         add_definitions(-DHWM_OVER_XU)
     endif()
 
+    if(COM_MULTITHREADED)
+        add_definitions(-DCOM_MULTITHREADED)
+    endif()
+
     if (ENFORCE_METADATA)
       add_definitions(-DENFORCE_METADATA)
     endif()
@@ -73,7 +77,12 @@ macro(global_set_flags)
         add_definitions(-DNET_DEVICE)
         set(LRS_NET_TARGET realsense2-net)
     endif()
-
+    
+    if(CHECK_FOR_UPDATES)
+        include(CMake/external_libcurl.cmake)
+        add_definitions(-DCHECK_FOR_UPDATES)
+    endif()
+    
     add_definitions(-D${BACKEND} -DUNICODE)
 endmacro()
 
@@ -95,6 +104,9 @@ macro(global_target_config)
             $<INSTALL_INTERFACE:include>
             PRIVATE ${USB_INCLUDE_DIRS}
     )
+
+
+
 endmacro()
 
 macro(add_tm2)

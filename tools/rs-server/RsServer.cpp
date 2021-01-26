@@ -13,6 +13,12 @@
 #include "RsRTSPServer.hh"
 #include "RsServerMediaSession.h"
 #include "RsCommon.h"
+#include <compression/CompressionFactory.h>
+
+#include "tclap/CmdLine.h"
+#include "tclap/ValueArg.h"
+
+using namespace TCLAP;
 
 struct server
 {
@@ -23,6 +29,7 @@ struct server
     std::vector<rs2::video_stream_profile> supported_stream_profiles; // streams for extrinsics map creation
     std::vector<RsSensor> sensors;
     TaskScheduler* scheduler;
+    unsigned int port = 8554;
 
     void main(int argc, char** argv)
     {
@@ -30,14 +37,42 @@ struct server
 
         START_EASYLOGGINGPP(argc, argv);
 
-        OutPacketBuffer::increaseMaxSizeTo(MAX_MESSAGE_SIZE);
+        CmdLine cmd("LRS Network Extentions Server", ' ', RS2_API_VERSION_STR);
 
+        SwitchArg arg_enable_compression("c", "enable-compression", "Enable video compression");
+        ValueArg<std::string> arg_address("i", "interface-address", "Address of the interface to bind on", false, "", "string");
+        ValueArg<unsigned int> arg_port("p", "port", "RTSP port to listen on", false, 8554, "integer");
+
+        cmd.add(arg_enable_compression);
+        cmd.add(arg_address);
+        cmd.add(arg_port);
+
+        cmd.parse(argc, argv);
+
+        CompressionFactory::getIsEnabled() = 0;
+        if (arg_enable_compression.isSet())
+        {
+            CompressionFactory::getIsEnabled() = 1;
+        }
+
+        if (arg_address.isSet()) 
+        {
+            ReceivingInterfaceAddr = our_inet_addr(arg_address.getValue().c_str());
+        }
+
+        if (arg_port.isSet())
+        {
+            port = arg_port.getValue();
+        }
+        
+        OutPacketBuffer::increaseMaxSizeTo(MAX_MESSAGE_SIZE);
+        
         // Begin by setting up our usage environment:
         scheduler = BasicTaskScheduler::createNew();
         env = RSUsageEnvironment::createNew(*scheduler);
 
         rsDevice = std::make_shared<RsDevice>(env);
-        rtspServer = RsRTSPServer::createNew(*env, rsDevice, 8554);
+        rtspServer = RsRTSPServer::createNew(*env, rsDevice, port);
 
         if(rtspServer == NULL)
         {
@@ -51,7 +86,7 @@ struct server
             RsServerMediaSession* sms;
             if(sensor.getSensorName().compare(STEREO_SENSOR_NAME) == 0 || sensor.getSensorName().compare(RGB_SENSOR_NAME) == 0)
             {
-                sms = RsServerMediaSession::createNew(*env, sensor, sensor.getSensorName().data(), "", "Session streamed by \"realsense streamer\"", True);
+                sms = RsServerMediaSession::createNew(*env, sensor, sensor.getSensorName().data(), "", "Session streamed by \"realsense streamer\"", False);
             }
             else
             {
@@ -61,11 +96,16 @@ struct server
             for(auto stream_profile : sensor.getStreamProfiles())
             {
                 rs2::video_stream_profile stream = stream_profile.second;
-                if(stream.format() == RS2_FORMAT_BGR8 || stream.format() == RS2_FORMAT_RGB8 || stream.format() == RS2_FORMAT_Z16 || stream.format() == RS2_FORMAT_Y8 || stream.format() == RS2_FORMAT_YUYV || stream.format() == RS2_FORMAT_UYVY)
+                if(stream.format() == RS2_FORMAT_BGR8 
+                || stream.format() == RS2_FORMAT_RGB8 
+                || stream.format() == RS2_FORMAT_Z16 
+                || stream.format() == RS2_FORMAT_Y8 
+                || stream.format() == RS2_FORMAT_YUYV 
+                || stream.format() == RS2_FORMAT_UYVY)
                 {
                     if(stream.fps() == 6)
                     {
-                        if((stream.width() == 1280 && stream.height() == 720) || (stream.width() == 640 && stream.height() == 480) || (stream.width() == 480 && stream.height() == 270) || (stream.width() == 424 && stream.height() == 240))
+                        if((stream.width() == 1280 && stream.height() == 720) || (stream.width() == 640 && stream.height() == 480)) 
                         {
                             sms->addSubsession(RsServerMediaSubsession::createNew(*env, stream, rsDevice));
 
@@ -75,7 +115,7 @@ struct server
                     }
                     else if(stream.fps() == 15 || stream.fps() == 30)
                     {
-                        if((stream.width() == 640 && stream.height() == 480) || (stream.width() == 480 && stream.height() == 270) || (stream.width() == 424 && stream.height() == 240))
+                        if((stream.width() == 1280 && stream.height() == 720) || (stream.width() == 640 && stream.height() == 480))
                         {
                             sms->addSubsession(RsServerMediaSubsession::createNew(*env, stream, rsDevice));
                             supported_stream_profiles.push_back(stream);
@@ -84,7 +124,37 @@ struct server
                     }
                     else if(stream.fps() == 60)
                     {
-                        if((stream.width() == 480 && stream.height() == 270) || (stream.width() == 424 && stream.height() == 240))
+                        if((stream.width() == 640 && stream.height() == 480))
+                        {
+                            sms->addSubsession(RsServerMediaSubsession::createNew(*env, stream, rsDevice));
+                            supported_stream_profiles.push_back(stream);
+                            continue;
+                        }
+                    }
+                    else if(stream.fps() == 10)
+                    {
+                         if(stream.format() == RS2_FORMAT_YUYV && stream.width() == 1280 && stream.height() == 720)
+                         {
+                            sms->addSubsession(RsServerMediaSubsession::createNew(*env, stream, rsDevice));
+                            supported_stream_profiles.push_back(stream);
+                            continue;
+                         }
+                    }
+                }
+                if (stream.format() == RS2_FORMAT_Z16 || stream.format() == RS2_FORMAT_Y8 )
+                {
+                    if(stream.fps() == 6 || stream.fps() == 15 || stream.fps() == 30)
+                    {
+                        if(stream.width() == 848 && stream.height() == 480)
+                        {
+                            sms->addSubsession(RsServerMediaSubsession::createNew(*env, stream, rsDevice));
+                            supported_stream_profiles.push_back(stream);
+                            continue;
+                        }
+                    }
+                    if(stream.fps() == 30 || stream.fps() == 60)
+                    {
+                        if(stream.width() == 640 && stream.height() == 360)
                         {
                             sms->addSubsession(RsServerMediaSubsession::createNew(*env, stream, rsDevice));
                             supported_stream_profiles.push_back(stream);
@@ -92,6 +162,31 @@ struct server
                         }
                     }
                 }
+                if (stream.format() == RS2_FORMAT_YUYV)
+                {
+                    if(stream.fps() == 6 || stream.fps() == 15 || stream.fps() == 30 || stream.fps() == 60)
+                    {
+                        if(stream.width() == 424 && stream.height() == 240)
+                        {
+                            sms->addSubsession(RsServerMediaSubsession::createNew(*env, stream, rsDevice));
+                            supported_stream_profiles.push_back(stream);
+                            continue;
+                        }
+                    }
+                }
+            if (stream.format() == RS2_FORMAT_Z16 || stream.format() == RS2_FORMAT_Y8 || stream.format() == RS2_FORMAT_UYVY)
+            {
+                if(stream.fps() == 6 || stream.fps() == 15 || stream.fps() == 30 || stream.fps() == 60 ||  stream.fps() == 90)
+                    {
+                        if(stream.width() == 480 && stream.height() == 270)
+                        {
+                            sms->addSubsession(RsServerMediaSubsession::createNew(*env, stream, rsDevice));
+                            supported_stream_profiles.push_back(stream);
+                            continue;
+                        }
+                    }
+            }
+
                 *env << "Ignoring stream: format: " << stream.format() << " width: " << stream.width() << " height: " << stream.height() << " fps: " << stream.fps() << "\n";
             }
 

@@ -500,17 +500,46 @@ namespace librealsense
         std::lock_guard<std::mutex> lock(_power_lock);
         if (_user_count.fetch_add(1) == 0)
         {
-            _device->set_power_state(platform::D0);
-            for (auto&& xu : _xus) _device->init_xu(xu);
+            try
+            {
+                _device->set_power_state( platform::D0 );
+                for( auto && xu : _xus )
+                    _device->init_xu( xu );
+            }
+            catch( std::exception const & e )
+            {
+                _user_count.fetch_add( -1 );
+                LOG_ERROR( "acquire_power failed: " << e.what() );
+                throw;
+            }
+            catch( ... )
+            {
+                _user_count.fetch_add( -1 );
+                LOG_ERROR( "acquire_power failed" );
+                throw;
+            }
         }
     }
 
     void uvc_sensor::release_power()
     {
-        std::lock_guard<std::mutex> lock(_power_lock);
-        if (_user_count.fetch_add(-1) == 1)
+        std::lock_guard< std::mutex > lock( _power_lock );
+        if( _user_count.fetch_add( -1 ) == 1 )
         {
-            _device->set_power_state(platform::D3);
+            try
+            {
+                _device->set_power_state( platform::D3 );
+            }
+            catch( std::exception const & e )
+            {
+                // TODO may need to change the user-count?
+                LOG_ERROR( "release_power failed: " << e.what() );
+            }
+            catch( ... )
+            {
+                // TODO may need to change the user-count?
+                LOG_ERROR( "release_power failed" );
+            }
         }
     }
 
@@ -611,26 +640,6 @@ namespace librealsense
     void uvc_sensor::register_pu(rs2_option id)
     {
         register_option(id, std::make_shared<uvc_pu_option>(*this, id));
-    }
-
-    void uvc_sensor::try_register_pu(rs2_option id)
-    {
-        auto opt = std::make_shared<uvc_pu_option>(*this, id);
-        try
-        {
-            auto range = opt->get_range();
-            if (range.max <= range.min || range.step <= 0 || range.def < range.min || range.def > range.max) return;
-
-            auto val = opt->query();
-            if (val < range.min || val > range.max) return;
-            opt->set(val);
-
-            register_option(id, opt);
-        }
-        catch (...)
-        {
-            LOG_WARNING("Exception was thrown when inspecting " << this->get_info(RS2_CAMERA_INFO_NAME) << " property " << opt->get_description());
-        }
     }
 
     //////////////////////////////////////////////////////
@@ -1042,11 +1051,55 @@ namespace librealsense
         }
     }
 
+    // Register the option to both raw sensor and synthetic sensor.
     void synthetic_sensor::register_option(rs2_option id, std::shared_ptr<option> option)
     {
-        // Register the option to both raw sensor and synthetic sensor.
         _raw_sensor->register_option(id, option);
         sensor_base::register_option(id, option);
+    }
+
+    // Used in dynamic discovery of supported controls in generic UVC devices
+    bool synthetic_sensor::try_register_option(rs2_option id, std::shared_ptr<option> option)
+    {
+        bool res=false;
+        try
+        {
+            auto range = option->get_range();
+            bool invalid_opt = (range.max < range.min || range.step < 0 || range.def < range.min || range.def > range.max) ||
+                    (range.max == range.min && range.min == range.def && range.def == range.step);
+            bool readonly_opt = ((range.max == range.min ) && (0.f != range.min ) && ( 0.f == range.step));
+
+            if (invalid_opt)
+            {
+                LOG_WARNING(this->get_info(RS2_CAMERA_INFO_NAME) << ": skipping " << rs2_option_to_string(id)
+                            << " control. descriptor: [min/max/step/default]= ["
+                            << range.min << "/" << range.max << "/" << range.step << "/" << range.def << "]");
+                return res;
+            }
+
+            if (readonly_opt)
+            {
+                LOG_INFO(this->get_info(RS2_CAMERA_INFO_NAME) << ": " << rs2_option_to_string(id)
+                        << " control was added as read-only. descriptor: [min/max/step/default]= ["
+                        << range.min << "/" << range.max << "/" << range.step << "/" << range.def << "]");
+            }
+
+            // Check getter only due to options coupling (e.g. Exposure<->AutoExposure)
+            auto val = option->query();
+            if (val < range.min || val > range.max)
+            {
+                LOG_WARNING(this->get_info(RS2_CAMERA_INFO_NAME) << ": Invalid reading for " << rs2_option_to_string(id)
+                            << ", val = " << val << " range [min..max] = [" << range.min << "/" << range.max << "]");
+            }
+
+            register_option(id, option);
+            res = true;
+        }
+        catch (...)
+        {
+            LOG_WARNING("Failed to add " << rs2_option_to_string(id)<< " control for " << this->get_info(RS2_CAMERA_INFO_NAME));
+        }
+        return res;
     }
 
     void synthetic_sensor::unregister_option(rs2_option id)
@@ -1061,6 +1114,12 @@ namespace librealsense
         register_option(id, std::make_shared<uvc_pu_option>(*raw_uvc_sensor.get(), id));
     }
 
+    bool synthetic_sensor::try_register_pu(rs2_option id)
+    {
+        const auto&& raw_uvc_sensor = As<uvc_sensor, sensor_base>(_raw_sensor);
+        return try_register_option(id, std::make_shared<uvc_pu_option>(*raw_uvc_sensor.get(), id));
+    }
+
     void synthetic_sensor::sort_profiles(stream_profiles* profiles)
     {
         std::sort(profiles->begin(), profiles->end(), [](const std::shared_ptr<stream_profile_interface>& ap,
@@ -1071,8 +1130,9 @@ namespace librealsense
 
             // stream == RS2_STREAM_COLOR && format == RS2_FORMAT_RGB8 element works around the fact that Y16 gets priority over RGB8 when both
             // are available for pipeline stream resolution
-            const auto&& at = std::make_tuple(a.stream, a.width, a.height, a.fps, a.stream == RS2_STREAM_COLOR && a.format == RS2_FORMAT_RGB8, a.format);
-            const auto&& bt = std::make_tuple(b.stream, b.width, b.height, b.fps, b.stream == RS2_STREAM_COLOR && b.format == RS2_FORMAT_RGB8, b.format);
+            // Note: Sort Stream Index decsending to make sure IR1 is chosen over IR2
+            const auto&& at = std::make_tuple(a.stream, -a.index, a.width, a.height, a.fps, a.stream == RS2_STREAM_COLOR && a.format == RS2_FORMAT_RGB8, a.format);
+            const auto&& bt = std::make_tuple(b.stream, -b.index, b.width, b.height, b.fps, b.stream == RS2_STREAM_COLOR && b.format == RS2_FORMAT_RGB8, b.format);
 
             return at > bt;
         });
@@ -1093,6 +1153,7 @@ namespace librealsense
             cloned = std::make_shared<motion_stream_profile>(platform::stream_profile{});
         }
 
+        assign_stream(profile, cloned);
         cloned->set_unique_id(profile->get_unique_id());
         cloned->set_format(profile->get_format());
         cloned->set_stream_index(profile->get_stream_index());
@@ -1385,6 +1446,7 @@ namespace librealsense
         _profiles_to_processing_block.erase(begin(_profiles_to_processing_block), end(_profiles_to_processing_block));
         _cached_requests.erase(_cached_requests.begin(), _cached_requests.end());
         set_active_streams({});
+        _post_process_callback.reset();
     }
 
     template<class T>
@@ -1392,7 +1454,7 @@ namespace librealsense
     {
         return {
             new internal_frame_callback<T>(callback),
-            [](rs2_frame_callback* p) { /*p->release(); */}
+            [](rs2_frame_callback* p) { p->release(); }
         };
     }
 
@@ -1465,7 +1527,7 @@ namespace librealsense
         }
 
         // Invoke processing blocks callback
-        const auto&& process_cb = make_callback([&, callback, this](frame_holder f) {
+        const auto&& process_cb = make_callback([&, this](frame_holder f) {
             if (!f)
                 return;
 
