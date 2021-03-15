@@ -19,6 +19,10 @@ My build instruction (on a Jetson Nano with all dependencies installed):
 6)  make -j4
 7)  sudo make install
 
+That seems to install the python bindings for python3, but I need them for python2. So I copied build/wrappers/python/pyrealsense2.so to
+/usr/local/lib/python2.7/dist-packages Not sure if that is working though.
+
+
 In my case, the camera is being run from realsense-ros. So I rebuild that using the libraries installed above.
 
 R. Kent James <kent@caspia.com> May 18, 2020
